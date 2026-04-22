@@ -1,13 +1,11 @@
 # 🍲 MISo – Morphoelastic Inverse problem Solver
-
-MISo computes the stress‑free reference configuration of a hyperelastic solid whose current (observed) shape is a sphere.  
+MISo computes the **hydrostatic pressure field** inside a sphere that results from forcing an arbitrary solid into a spherical shape while allowing shear stresses to relax.  
 It solves the inverse morphoelastic problem:
 
-1. Load an arbitrary solid from an STL file.
-2. Compute a conformal map from its surface to the unit sphere.
-3. Extend the map volumetrically using As‑Conformal‑As‑Possible (ACAP) mapping.
-4. Relax shear stresses via GPU‑accelerated gradient descent while keeping the boundary fixed to the sphere.
-5. Output the final pressure field inside the sphere.
+> Given a solid shape (STL), map it to a sphere using a conformal volumetric map, then relax all shear stresses under an isochoric hyperelastic material while **keeping the boundary fixed to the sphere**. The resulting pressure field is the **reaction pressure** required to maintain the spherical shape against the deviatoric (shear) stresses.
+
+This pressure field can be interpreted as the internal stress state of a material that has been "grown" from a stress‑free sphere into the observed shape, then shear‑relaxed.
+
 
 ## Features
 
