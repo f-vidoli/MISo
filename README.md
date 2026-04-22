@@ -4,7 +4,7 @@ It solves the inverse morphoelastic problem:
 
 > Given a solid shape (STL), map it to a sphere using a conformal volumetric map, then relax all shear stresses under an isochoric hyperelastic material while **keeping the boundary fixed to the sphere**. The resulting pressure field is the **reaction pressure** required to maintain the spherical shape against the deviatoric (shear) stresses.
 
-This pressure field can be interpreted as the internal stress state of a material that has been "grown" from a stress‑free sphere into the observed shape, then shear‑relaxed.
+This pressure field can be interpreted as the internal stress state of a material that has been "grown" from a stress‑free sphere into the observed shape.
 
 
 ## Features
