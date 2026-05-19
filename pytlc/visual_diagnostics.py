@@ -242,11 +242,26 @@ def plot_stress_distribution(
     # Compute Von Mises stress for each element
     von_mises = []
     for i in range(len(elements)):
-        s = stress[i]
+        s = np.array(stress[i])  # Ensure numpy array
+        
+        # Safety check: ensure s is a 2D matrix
+        if s.ndim != 2 or s.shape[0] != s.shape[1]:
+            print(f"Warning: Invalid stress tensor shape {s.shape} at element {i}, skipping.")
+            von_mises.append(0.0)
+            continue
+            
         if dim == 3:
+            if s.shape != (3, 3):
+                print(f"Warning: Expected 3x3 stress tensor but got {s.shape} at element {i}.")
+                von_mises.append(0.0)
+                continue
             s_dev = s - np.trace(s) / 3 * np.eye(3)
             vm = np.sqrt(3/2 * np.sum(s_dev * s_dev))
         else:
+            if s.shape != (2, 2):
+                print(f"Warning: Expected 2x2 stress tensor but got {s.shape} at element {i}.")
+                von_mises.append(0.0)
+                continue
             s_dev = s - np.trace(s) / 2 * np.eye(2)
             vm = np.sqrt(np.sum(s_dev * s_dev))
         von_mises.append(vm)
