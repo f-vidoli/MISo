@@ -34,6 +34,7 @@ from pytlc import (
     check_injectivity,
     find_injective_mapping,
     compute_shear_stress_hyperelastic,
+    compute_cauchy_stress_hyperelastic,
     compute_von_mises_stress,
     write_vtk_file,
     diagnose_mesh_quality,
@@ -41,6 +42,7 @@ from pytlc import (
     plot_stress_distribution,
     generate_diagnostic_report,
     tet_signed_volume,
+    extract_boundary_vertices,
 )
 
 
@@ -139,26 +141,55 @@ def main():
     
     if n_negative > 0:
         print("  Running TLC optimization to fix inverted elements...")
-        opt_result = find_injective_mapping(
-            vertices,
-            tetrahedra,
-            boundary_fixed=True,
-            max_iterations=100,
-            verbose=False
-        )
         
-        vertices = opt_result['optimized_vertices']
+        # Extract boundary vertices to fix as handles
+        boundary_verts = extract_boundary_vertices(tetrahedra)
         
-        # Re-check
-        is_injective, min_vol = check_injectivity(vertices, tetrahedra)
-        n_negative = sum(1 for i in range(len(tetrahedra))
-                         if tet_signed_volume(vertices[tetrahedra[i]]) / 6.0 < 0)
-        print(f"  After optimization: {n_negative} inverted elements")
+        # Fallback: if boundary extraction fails or returns too few, fix all surface vertices
+        if len(boundary_verts) < 10:
+            print("  ⚠️  Automatic boundary detection found few vertices. Fixing all surface vertices...")
+            boundary_verts = np.unique(surface_faces)
         
-        if n_negative > 0:
-            print("  WARNING: Some elements remain inverted. Results may be inaccurate.")
+        print(f"  🔒 Fixing {len(boundary_verts)} boundary vertices as handles...")
+        
+        try:
+            # For fixing inverted elements, we use the current vertices as both rest and initial
+            # The optimization will move interior vertices to eliminate inversions
+            opt_result = find_injective_mapping(
+                rest_vertices=vertices,      # Source mesh (reference configuration)
+                init_vertices=vertices,      # Initial embedding (current configuration)
+                simplices=tetrahedra,        # Connectivity
+                handles=boundary_verts,      # Fixed boundary vertices
+                form='Tutte',
+                max_iterations=500,
+                ftol_abs=1e-8,
+                ftol_rel=1e-8,
+                xtol_abs=1e-8,
+                xtol_rel=1e-8,
+                stop_when_injective=True,
+                verbose=False
+            )
+            
+            if opt_result['success']:
+                vertices = opt_result['vertices']  # Changed from 'optimized_vertices' to 'vertices'
+                print("  ✅ TLC optimization successful!")
+                
+                # Re-check
+                is_injective, min_vol = check_injectivity(vertices, tetrahedra)
+                n_negative = sum(1 for i in range(len(tetrahedra))
+                                 if tet_signed_volume(vertices[tetrahedra[i]]) / 6.0 < 0)
+                print(f"  📊 After optimization: {n_negative} inverted elements, min vol = {min_vol:.6e}")
+                
+                if n_negative > 0:
+                    print("  ⚠️  Warning: Some elements remain inverted. Try increasing max_iterations.")
+            else:
+                print("  ❌ TLC optimization failed to converge.")
+                print(f"     Reason: {opt_result.get('message', 'Unknown')}")
+        except Exception as e:
+            print(f"  ❌ Error during optimization: {e}")
+            return False
     else:
-        print("  Mesh is already injective ✓")
+        print("  ✅ Mesh is already injective (no inverted elements).")
     
     # -------------------------------------------------------------------------
     # Step 4: Diagnose mesh quality
@@ -200,17 +231,18 @@ def main():
     
     F_elements = compute_deformation_gradients(vertices, deformed_vertices, tetrahedra)
     
-    # Compute stress for each tetrahedron
-    stress_tensors = compute_shear_stress_hyperelastic(
+    # Compute stress for each tetrahedron (returns full Cauchy stress tensors)
+    full_stress_tensors, _ = compute_cauchy_stress_hyperelastic(
         F_elements,
         shear_modulus=shear_modulus,
-        bulk_modulus=bulk_modulus
+        bulk_modulus=bulk_modulus,
+        return_full_stress=True
     )
     
-    # Compute Von Mises stress
-    von_mises = np.array([compute_von_mises_stress(s) for s in stress_tensors])
+    # Compute Von Mises stress from full stress tensors
+    von_mises = np.array([compute_von_mises_stress(s) for s in full_stress_tensors])
     
-    print(f"  Computed stress for {len(stress_tensors)} elements")
+    print(f"  Computed stress for {len(full_stress_tensors)} elements")
     print(f"  Von Mises stress range: [{von_mises.min():.2f}, {von_mises.max():.2f}] Pa")
     print(f"  Mean Von Mises stress: {von_mises.mean():.2f} Pa")
     
@@ -246,12 +278,12 @@ def main():
     )
     print(f"  Saved mesh quality plot: {quality_plot_path}")
     
-    # Plot stress distribution
+    # Plot stress distribution (pass element stress tensors, not vertex stress)
     stress_plot_path = os.path.join(output_dir, 'stl_stress_distribution.png')
     plot_stress_distribution(
         deformed_vertices,
         tetrahedra,
-        vertex_stress,
+        full_stress_tensors,  # Pass element stress tensors (n_elements, 3, 3)
         title="Von Mises Stress Distribution",
         cmap='hot',
         output_path=stress_plot_path,
