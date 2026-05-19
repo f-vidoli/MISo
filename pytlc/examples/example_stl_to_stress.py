@@ -109,12 +109,15 @@ def main():
     
     # -------------------------------------------------------------------------
     # Step 2: Convert to tetrahedral volume mesh
+    print("   Using Delaunay method for even point distribution")
     # -------------------------------------------------------------------------
     print("\n[Step 2] Converting surface to tetrahedral volume mesh...")
     vol_mesh = create_tetrahedral_mesh_from_surface(
         surface_vertices,
         surface_faces,
-        method='centroid'
+        method='delaunay',
+        n_interior_points=50,
+        seed=42
     )
     
     vertices = vol_mesh['vertices']
