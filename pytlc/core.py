@@ -1345,7 +1345,7 @@ def _compute_hyperelastic_cauchy_single(
     return sigma_full, sigma_dev
 
 
-def relax_sphere_from_shear_stress(
+def relax_boundary_preserving_sphericity(
     stressed_vertices: np.ndarray,
     simplices: np.ndarray,
     boundary_vertex_indices: np.ndarray,
@@ -1358,9 +1358,10 @@ def relax_sphere_from_shear_stress(
     verbose: bool = False
 ) -> Dict[str, Any]:
     """
-    Relax a stressed sphere while preserving the sphericity of the boundary.
+    Relax a stressed configuration while preserving the sphericity of the boundary.
     
-    This function computes a relaxed configuration of a sphere that has been deformed
+    This is the core relaxation routine in MISo (Morphoelastic Inverse problem Solver).
+    It computes the relaxed (stress-free) configuration of a body that has been deformed
     by shear stress. The boundary vertices are constrained to lie on a sphere,
     while interior vertices are free to move to minimize the elastic energy.
     
@@ -1369,10 +1370,14 @@ def relax_sphere_from_shear_stress(
     2. Project boundary vertices back onto the sphere surface after each iteration
     3. Continue until convergence
     
+    This relaxation provides the morphoelastic inverse solution: given a deformed
+    shape, find the stress-free reference configuration that would produce it under
+    the applied boundary conditions.
+    
     Parameters
     ----------
     stressed_vertices : np.ndarray
-        Vertex positions of the stressed sphere, shape (n_verts, 3)
+        Vertex positions of the stressed (deformed) configuration, shape (n_verts, 3)
     simplices : np.ndarray
         Tetrahedral connectivity, shape (n_tets, 4)
     boundary_vertex_indices : np.ndarray
@@ -1384,7 +1389,7 @@ def relax_sphere_from_shear_stress(
     shear_modulus : float, optional
         Shear modulus for hyperelastic material, by default 1.0
     bulk_modulus : float, optional
-        Bulk modulus. If None, assumes nearly incompressible.
+        Bulk modulus. If None, assumes nearly incompressible (bulk = 1000 * shear).
     max_iterations : int, optional
         Maximum number of relaxation iterations, by default 5000
     tolerance : float, optional
@@ -1396,13 +1401,15 @@ def relax_sphere_from_shear_stress(
     -------
     dict
         Dictionary containing:
-        - 'relaxed_vertices': Vertex positions of the relaxed sphere
+        - 'relaxed_vertices': Vertex positions of the relaxed (stress-free) configuration
         - 'boundary_map': Map from stressed to relaxed boundary vertices
         - 'interior_map': Map from stressed to relaxed interior vertices
         - 'iterations': Number of iterations performed
         - 'converged': Whether the relaxation converged
         - 'displacement_history': History of maximum vertex displacement per iteration
         - 'energy_history': History of TLC energy per iteration
+        - 'sphere_center': Center of the constraint sphere
+        - 'sphere_radius': Radius of the constraint sphere
         
     Notes
     -----
@@ -1412,6 +1419,16 @@ def relax_sphere_from_shear_stress(
     
     The relaxation minimizes the elastic energy while maintaining injectivity
     of the mapping, making it suitable for handling large deformations.
+    
+    In the context of MISo, this function solves the inverse problem:
+    Given the current (stressed) configuration Ω_current, find the reference
+    configuration Ω_ref such that the deformation gradient F satisfies the
+    constitutive relations with zero residual stress.
+    
+    See Also
+    --------
+    compute_morphoelastic_jacobian : Compute the Jacobian determinant (MISo solution)
+    compute_deformation_gradient_tensor : Compute F for each simplex
     """
     n_verts = stressed_vertices.shape[0]
     dim = stressed_vertices.shape[1]
@@ -1548,20 +1565,24 @@ def relax_sphere_from_shear_stress(
     return result
 
 
-def compute_deformation_gradient_map(
+def compute_deformation_gradient_tensor(
     source_vertices: np.ndarray,
     target_vertices: np.ndarray,
     simplices: np.ndarray
 ) -> np.ndarray:
     """
-    Compute the deformation gradient tensor for each simplex.
+    Compute the deformation gradient tensor F for each simplex.
     
     The deformation gradient F maps vectors from the source configuration
     to the target configuration: v_target = F * v_source
     
+    This is a fundamental quantity in continuum mechanics and morphoelasticity.
     For a simplex with vertices x0, x1, ..., xn in the source and
     y0, y1, ..., yn in the target, we compute F such that:
         yi - y0 = F * (xi - x0) for i = 1, ..., n
+    
+    In the context of MISo, this computes the local deformation gradient
+    between two configurations (e.g., stressed -> relaxed).
     
     Parameters
     ----------
@@ -1576,6 +1597,16 @@ def compute_deformation_gradient_map(
     -------
     np.ndarray
         Deformation gradient tensors, shape (n_simplices, dim, dim)
+        
+    Notes
+    -----
+    The deformation gradient can be decomposed as F = R * U (polar decomposition),
+    where R is rotation and U is the right stretch tensor. The Jacobian determinant
+    J = det(F) measures local volume change.
+    
+    See Also
+    --------
+    compute_morphoelastic_jacobian : Compute J = det(F) (the MISo solution)
     """
     n_simplices = len(simplices)
     dim = source_vertices.shape[1]
@@ -1610,18 +1641,26 @@ def compute_deformation_gradient_map(
     return deformation_gradients
 
 
-def compute_jacobian_determinant_map(
+def compute_morphoelastic_jacobian(
     source_vertices: np.ndarray,
     target_vertices: np.ndarray,
     simplices: np.ndarray
 ) -> np.ndarray:
     """
-    Compute the Jacobian determinant (det(F)) for each simplex.
+    Compute the Jacobian determinant J = det(F) for each simplex.
+    
+    This is the core MISo (Morphoelastic Inverse problem Solver) solution.
+    Given an STL mesh representing a deformed configuration, this function
+    computes the local volume change ratio between the source and target
+    configurations.
     
     The Jacobian determinant measures the local volume change:
     - J > 1: local expansion
-    - J < 1: local compression
+    - J < 1: local compression  
     - J = 1: volume-preserving
+    
+    In morphoelasticity, J represents the growth factor or the determinant
+    of the elastic part of the deformation gradient.
     
     Parameters
     ----------
@@ -1636,8 +1675,22 @@ def compute_jacobian_determinant_map(
     -------
     np.ndarray
         Jacobian determinants, shape (n_simplices,)
+        
+    Notes
+    -----
+    The Jacobian determinant is computed as:
+        J = det(F) where F = d(target)/d(source)
+    
+    For the morphoelastic inverse problem, this gives the local volume
+    change required to transform the stressed configuration into the
+    relaxed (stress-free) configuration.
+    
+    See Also
+    --------
+    compute_deformation_gradient_tensor : Compute F tensor
+    stl_to_jacobian : Complete pipeline from STL file to Jacobian field
     """
-    deformation_gradients = compute_deformation_gradient_map(
+    deformation_gradients = compute_deformation_gradient_tensor(
         source_vertices, target_vertices, simplices
     )
     
@@ -1649,31 +1702,36 @@ def compute_jacobian_determinant_map(
     return jacobian_determinants
 
 
-def compose_maps_and_compute_jacobian(
+# Aliases for backward compatibility (defined after all functions)
+# These will be set at the end of the file after all function definitions
+
+
+def compute_composed_map_jacobian(
     initial_vertices: np.ndarray,
     stressed_vertices: np.ndarray,
     relaxed_vertices: np.ndarray,
     simplices: np.ndarray
 ) -> Dict[str, np.ndarray]:
     """
-    Compute the Jacobian determinant of the composed map from relaxed to initial.
+    Compute the Jacobian determinant of the composed deformation map.
     
-    Given three configurations:
-    - Initial: reference configuration (undeformed)
-    - Stressed: deformed by applied stress
-    - Relaxed: stress-relaxed while preserving boundary constraints
+    Given three configurations in the morphoelastic problem:
+    - Initial (Ω₀): reference configuration (undeformed)
+    - Stressed (Ωₛ): deformed by applied stress
+    - Relaxed (Ωᵣ): stress-relaxed while preserving boundary constraints
     
-    This function computes:
-    1. Map phi: stressed -> relaxed
-    2. Map psi: initial -> stressed
-    3. Composed map: relaxed -> initial (inverse of psi o phi^(-1))
-    4. Jacobian determinant of the composed map
+    This function computes the complete deformation chain and its Jacobian:
+    1. Deformation gradient F₁: initial → stressed
+    2. Deformation gradient F₂: stressed → relaxed  
+    3. Composed deformation gradient F = F₂ · F₁: initial → relaxed
+    4. Jacobian determinant J = det(F) for the composed map
     
-    The composition chain is:
-        relaxed --phi^(-1)--> stressed --psi^(-1)--> initial
+    The composition follows the chain rule:
+        F_composed = F_stressed_to_relaxed · F_initial_to_stressed
+        J_composed = J_stressed_to_relaxed × J_initial_to_stressed
     
-    Or equivalently, the forward map:
-        initial --psi--> stressed --phi--> relaxed
+    In MISo, this represents the total morphoelastic transformation from
+    the initial configuration through the stressed state to the relaxed state.
     
     Parameters
     ----------
@@ -1690,25 +1748,33 @@ def compose_maps_and_compute_jacobian(
     -------
     dict
         Dictionary containing:
-        - 'jacobian_determinants': J(det(dPhi_composed/dX)) for each simplex
-        - 'deformation_gradient_initial_to_stressed': F for initial->stressed
-        - 'deformation_gradient_stressed_to_relaxed': F for stressed->relaxed
-        - 'deformation_gradient_composed': F for initial->relaxed (composed)
-        - 'volume_ratios': Local volume change ratios
+        - 'jacobian_determinants': J = det(F_composed) for each simplex
+        - 'deformation_gradient_initial_to_stressed': F₁ tensor
+        - 'deformation_gradient_stressed_to_relaxed': F₂ tensor
+        - 'deformation_gradient_composed': F = F₂ · F₁ tensor
+        - 'volume_ratios': Local volume change ratios (same as jacobian_determinants)
+        - 'jacobian_initial_to_stressed': J₁ = det(F₁)
+        - 'jacobian_stressed_to_relaxed': J₂ = det(F₂)
+        - 'jacobian_chain_rule_product': J₂ × J₁ (verification)
         
     Notes
     -----
-    The Jacobian determinant of the composed map is computed using the chain rule:
-        det(F_composed) = det(F_stressed_to_relaxed) * det(F_initial_to_stressed)
+    The chain rule verification ensures numerical consistency:
+        max|J_composed - J₂ × J₁| < tolerance
     
-    This gives the total volume change from initial to relaxed configuration.
+    This is useful for debugging and validation of the morphoelastic solver.
+    
+    See Also
+    --------
+    compute_morphoelastic_jacobian : Compute J for a single map
+    relax_boundary_preserving_sphericity : Compute relaxed configuration
     """
     # Compute deformation gradients for each map
-    F_initial_to_stressed = compute_deformation_gradient_map(
+    F_initial_to_stressed = compute_deformation_gradient_tensor(
         initial_vertices, stressed_vertices, simplices
     )
     
-    F_stressed_to_relaxed = compute_deformation_gradient_map(
+    F_stressed_to_relaxed = compute_deformation_gradient_tensor(
         stressed_vertices, relaxed_vertices, simplices
     )
     
@@ -1750,54 +1816,72 @@ def compose_maps_and_compute_jacobian(
     return result
 
 
-def compute_map_stressed_to_relaxed(
-    stressed_vertices: np.ndarray,
-    relaxed_vertices: np.ndarray,
+def compute_deformation_map(
+    source_vertices: np.ndarray,
+    target_vertices: np.ndarray,
     simplices: np.ndarray,
     evaluation_points: Optional[np.ndarray] = None
 ) -> Dict[str, Any]:
     """
-    Compute and represent the map from stressed sphere to relaxed sphere.
+    Compute the complete deformation map between two configurations.
     
-    This function creates a continuous representation of the deformation map
-    that takes points from the stressed configuration to the relaxed configuration.
+    This function provides a comprehensive representation of the morphoelastic
+    deformation, including displacement field, deformation gradient tensor,
+    and Jacobian determinant (the MISo solution).
+    
+    The map φ: Ω_source → Ω_target is characterized by:
+    - Displacement field: u(x) = φ(x) - x
+    - Deformation gradient: F = ∂φ/∂X
+    - Jacobian determinant: J = det(F)
     
     Parameters
     ----------
-    stressed_vertices : np.ndarray
-        Stressed vertex positions, shape (n_verts, dim)
-    relaxed_vertices : np.ndarray
-        Relaxed vertex positions, shape (n_verts, dim)
+    source_vertices : np.ndarray
+        Source configuration vertex positions, shape (n_verts, dim)
+    target_vertices : np.ndarray
+        Target configuration vertex positions, shape (n_verts, dim)
     simplices : np.ndarray
         Simplex connectivity, shape (n_simplices, dim+1)
     evaluation_points : np.ndarray, optional
         Points at which to evaluate the map, shape (n_points, dim)
-        If None, returns only element-wise deformation gradients
+        If None, returns only element-wise quantities
         
     Returns
     -------
     dict
         Dictionary containing:
-        - 'vertex_map': Displacement at vertices (relaxed - stressed)
+        - 'vertex_map': Displacement at vertices (target - source)
         - 'deformation_gradients': F tensor for each simplex
-        - 'jacobian_determinants': det(F) for each simplex
+        - 'jacobian_determinants': J = det(F) for each simplex (MISo solution)
         - 'evaluated_map': Map values at evaluation points (if provided)
         - 'displacement_magnitude': |u| at each vertex
         - 'max_displacement': Maximum vertex displacement
         - 'mean_displacement': Mean vertex displacement
+        
+    Notes
+    -----
+    In the context of MISo, this function is typically used to compute:
+    - stressed → relaxed map (inverse morphoelastic problem)
+    - initial → deformed map (forward problem)
+    
+    See Also
+    --------
+    compute_morphoelastic_jacobian : Compute J only
+    compute_deformation_gradient_tensor : Compute F only
+    relax_boundary_preserving_sphericity : Compute relaxed configuration
     """
-    n_verts = stressed_vertices.shape[0]
-    dim = stressed_vertices.shape[1]
+    n_verts = source_vertices.shape[0]
+    dim = source_vertices.shape[1]
     
     # Vertex displacement map
-    displacement = relaxed_vertices - stressed_vertices
+    displacement = target_vertices - source_vertices
     displacement_magnitude = np.linalg.norm(displacement, axis=1)
     
     # Deformation gradients
-    F = compute_deformation_gradient_map(stressed_vertices, relaxed_vertices, simplices)
+    F = compute_deformation_gradient_tensor(source_vertices, target_vertices, simplices)
     
     # Jacobian determinants
-    J = compute_jacobian_determinant_map(stressed_vertices, relaxed_vertices, simplices)
+    J = compute_morphoelastic_jacobian(source_vertices, target_vertices, simplices)
     
     result = {
         'vertex_map': displacement,
@@ -1811,11 +1895,15 @@ def compute_map_stressed_to_relaxed(
     # Evaluate at arbitrary points if requested
     if evaluation_points is not None:
         evaluated = evaluate_map_at_points(
-            stressed_vertices, relaxed_vertices, simplices, evaluation_points
+            source_vertices, target_vertices, simplices, evaluation_points
         )
         result['evaluated_map'] = evaluated
     
     return result
+
+
+# Alias for backward compatibility
+compute_map_stressed_to_relaxed = compute_deformation_map
 
 
 def evaluate_map_at_points(
