@@ -9,15 +9,31 @@ This example demonstrates how to:
 """
 
 import numpy as np
+import os
 import sys
-sys.path.insert(0, '/workspace')
+
+# Add the grandparent directory to the path so we can import pytlc
+# This works regardless of where the script is run from
+# Structure: /workspace/pytlc/examples/example_stl_bunny.py
+#            ^-- grandparent is /workspace, which contains pytlc package
+current_dir = os.path.dirname(os.path.abspath(__file__))
+parent_dir = os.path.dirname(current_dir)  # /workspace/pytlc
+grandparent_dir = os.path.dirname(parent_dir)  # /workspace
+sys.path.insert(0, grandparent_dir)
 
 import pytlc
 
 
 def main():
-    # Path to the STL file
-    stl_path = '/workspace/data/bunny.stl'
+    # Path to the STL file - relative to the pytlc package directory
+    data_dir = os.path.join(parent_dir, 'data')
+    stl_path = os.path.join(data_dir, 'bunny.stl')
+    
+    # Check if file exists
+    if not os.path.exists(stl_path):
+        print(f"Error: STL file not found at {stl_path}")
+        print("Please ensure the bunny.stl file exists in the data directory.")
+        return None
     
     print("=" * 60)
     print("TLC Injectivity Example - Stanford Bunny")
@@ -105,8 +121,12 @@ def main():
     # Step 5: Save results
     print("\n[Step 5] Saving results...")
     
+    # Create output directory if it doesn't exist
+    output_dir = os.path.join(parent_dir, 'data')
+    os.makedirs(output_dir, exist_ok=True)
+    
     # Save in TLC format
-    output_path = '/workspace/data/bunny_result.tlc'
+    output_path = os.path.join(output_dir, 'bunny_result.tlc')
     pytlc.write_result_file(
         output_path,
         vertices=final_vertices,
@@ -116,7 +136,7 @@ def main():
     print(f"  Saved TLC result to: {output_path}")
     
     # Save as OBJ for visualization (using surface faces)
-    obj_path = '/workspace/data/bunny_result.obj'
+    obj_path = os.path.join(output_dir, 'bunny_result.obj')
     surface_faces = tlc_input['surface_faces']
     pytlc.write_obj_file(obj_path, final_vertices[:len(surface_faces)], surface_faces)
     print(f"  Saved OBJ file to: {obj_path}")
