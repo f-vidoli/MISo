@@ -1,0 +1,314 @@
+Metadata-Version: 2.4
+Name: pytlc
+Version: 0.1.0
+Summary: Python wrapper for Lifting Simplices to Find Injectivity (TLC energy)
+Home-page: https://github.com/duxingyi-charles/lifting_simplices_to_find_injectivity
+Author: Based on work by Xingyi Du et al.
+Classifier: Development Status :: 3 - Alpha
+Classifier: Intended Audience :: Science/Research
+Classifier: License :: OSI Approved :: MIT License
+Classifier: Programming Language :: Python :: 3
+Classifier: Programming Language :: Python :: 3.8
+Classifier: Programming Language :: Python :: 3.9
+Classifier: Programming Language :: Python :: 3.10
+Classifier: Programming Language :: Python :: 3.11
+Classifier: Programming Language :: Python :: 3.12
+Classifier: Topic :: Scientific/Engineering :: Mathematics
+Classifier: Topic :: Scientific/Engineering :: Visualization
+Requires-Python: >=3.8
+Description-Content-Type: text/markdown
+Requires-Dist: numpy>=1.20.0
+Requires-Dist: scipy>=1.7.0
+Provides-Extra: dev
+Requires-Dist: pytest>=6.0; extra == "dev"
+Requires-Dist: matplotlib>=3.4; extra == "dev"
+Dynamic: author
+Dynamic: classifier
+Dynamic: description
+Dynamic: description-content-type
+Dynamic: home-page
+Dynamic: provides-extra
+Dynamic: requires-dist
+Dynamic: requires-python
+Dynamic: summary
+
+# pytlc - Python wrapper for Lifting Simplices to Find Injectivity
+
+A Python wrapper for the Total Lifted Content (TLC) energy minimization method from the paper:
+
+**"Lifting Simplices to Find Injectivity"** by Xingyi Du et al. (SIGGRAPH 2020)
+
+This package provides tools for computing locally injective mappings for triangular and tetrahedral meshes by minimizing the TLC energy using gradient-based optimization.
+
+## Features
+
+- **2D and 3D support**: Works with both triangular and tetrahedral meshes
+- **Two energy forms**: Supports both "Tutte" and "harmonic" formulations
+- **Pure Python implementation**: No external C++ dependencies required
+- **SciPy optimization**: Uses scipy.optimize for robust gradient-based minimization
+- **NumPy array interface**: Easy integration with existing Python mesh processing workflows
+
+## Installation
+
+```bash
+pip install numpy scipy
+```
+
+## Quick Start
+
+```python
+import numpy as np
+from pytlc import find_injective_mapping
+
+# Define rest mesh vertices (source domain)
+rest_vertices = np.array([...], dtype=np.float64)  # shape: (n_verts, dim)
+
+# Define initial embedding (possibly non-injective)
+init_vertices = np.array([...], dtype=np.float64)  # shape: (n_verts, dim)
+
+# Define simplices (triangles or tetrahedra)
+simplices = np.array([...], dtype=np.int32)  # shape: (n_simplices, dim+1)
+
+# Define constrained vertices (handles/boundary)
+handles = np.array([...], dtype=np.int32)  # shape: (n_handles,)
+
+# Compute injective mapping
+result = find_injective_mapping(
+    rest_vertices=rest_vertices,
+    init_vertices=init_vertices,
+    simplices=simplices,
+    handles=handles,
+    form='Tutte',           # Energy form: 'Tutte' or 'harmonic'
+    alpha_ratio=1e-6,       # Ratio of content between rest and target
+    max_iterations=10000,   # Maximum optimization iterations
+    verbose=True
+)
+
+# Get result
+injective_vertices = result['vertices']
+energy_history = result.get('energy_history', [])
+```
+
+## API Reference
+
+### `find_injective_mapping`
+
+```python
+def find_injective_mapping(
+    rest_vertices: np.ndarray,
+    init_vertices: np.ndarray,
+    simplices: np.ndarray,
+    handles: np.ndarray,
+    form: str = 'Tutte',
+    alpha_ratio: float = 1e-6,
+    alpha: Optional[float] = None,
+    max_iterations: int = 10000,
+    ftol_abs: float = 1e-8,
+    ftol_rel: float = 1e-8,
+    xtol_abs: float = 1e-8,
+    xtol_rel: float = 1e-8,
+    record_energy: bool = False,
+    record_min_measure: bool = False,
+    stop_when_injective: bool = True,
+    verbose: bool = False
+) -> Dict[str, Any]
+```
+
+**Parameters:**
+
+- `rest_vertices`: Source mesh vertices (n_verts × dim array)
+- `init_vertices`: Initial embedding vertices (n_verts × dim array), may be non-injective
+- `simplices`: Mesh connectivity (n_simplices × (dim+1) array)
+  - For 2D: triangles (n_triangles × 3)
+  - For 3D: tetrahedra (n_tets × 4)
+- `handles`: Indices of constrained vertices that should not move
+- `form`: Energy formulation ('Tutte' or 'harmonic')
+- `alpha_ratio`: Target ratio of content between rest mesh and target domain
+- `alpha`: Override alpha value (if negative, computed from alpha_ratio)
+- `max_iterations`: Maximum number of optimization iterations
+- `ftol_abs`, `ftol_rel`: Absolute and relative function value tolerances
+- `xtol_abs`, `xtol_rel`: Absolute and relative variable change tolerances
+- `record_energy`: If True, record energy at each iteration
+- `record_min_measure`: If True, record minimum simplex measure (area/volume) at each iteration
+- `stop_when_injective`: If True, stop optimization when all simplices become positive
+- `verbose`: Print progress information
+
+**Returns:**
+
+Dictionary containing:
+- `vertices`: Optimized vertex positions (injective mapping)
+- `success`: Boolean indicating if optimization converged successfully
+- `message`: Optimization termination message
+- `iterations`: Number of iterations performed
+- `energy`: Final TLC energy value
+- `energy_history`: List of energy values per iteration (if recorded)
+- `min_measure_history`: List of minimum simplex measures per iteration (if recorded)
+
+### `compute_tlc_energy`
+
+```python
+def compute_tlc_energy(
+    vertices: np.ndarray,
+    simplices: np.ndarray,
+    rest_squared_edges: np.ndarray,
+    form: str = 'Tutte'
+) -> float
+```
+
+Compute the Total Lifted Content energy for a given mesh configuration.
+
+### `check_injectivity`
+
+```python
+def check_injectivity(
+    vertices: np.ndarray,
+    simplices: np.ndarray
+) -> Tuple[bool, float]
+```
+
+Check if a mesh configuration is locally injective (all simplices have positive measure).
+
+**Returns:**
+- `is_injective`: True if all simplices have positive signed measure
+- `min_measure`: Minimum signed measure across all simplices
+
+## File I/O Utilities
+
+### `read_input_file`
+
+```python
+def read_input_file(filepath: str) -> Dict[str, np.ndarray]
+```
+
+Read input file in the original TLC format.
+
+### `write_result_file`
+
+```python
+def write_result_file(
+    filepath: str,
+    vertices: np.ndarray,
+    rest_vertices: np.ndarray,
+    simplices: np.ndarray,
+    energy_history: Optional[List[float]] = None,
+    min_measure_history: Optional[List[float]] = None
+)
+```
+
+Write result file in the original TLC format.
+
+### `read_stl_with_trimesh`
+
+```python
+def read_stl_with_trimesh(filepath: str) -> Dict[str, np.ndarray]
+```
+
+Read an STL surface mesh file using trimesh library.
+
+### `stl_to_tlc_input`
+
+```python
+def stl_to_tlc_input(
+    filepath: str,
+    use_trimesh: bool = True,
+    tet_method: str = 'centroid'
+) -> Dict[str, np.ndarray]
+```
+
+Convert an STL surface mesh to TLC input format by creating a tetrahedral mesh.
+
+**Parameters:**
+- `filepath`: Path to the STL file
+- `use_trimesh`: Use trimesh library for reading (recommended)
+- `tet_method`: Method for tetrahedralization ('centroid' or 'origin')
+
+**Returns:**
+Dictionary containing:
+- `rest_vertices`: Source mesh vertices
+- `init_vertices`: Initial embedding vertices  
+- `simplices`: Tetrahedron connectivity
+- `handles`: Boundary vertex indices (fixed during optimization)
+- `boundary_vertices`: Indices of surface/boundary vertices
+- `interior_vertices`: Indices of interior vertices
+- `surface_faces`: Original surface face connectivity
+
+## STL Support
+
+The package now includes utilities for working directly with STL surface meshes:
+
+```python
+import pytlc
+
+# Load from STL and automatically create tetrahedral mesh
+tlc_input = pytlc.stl_to_tlc_input('mesh.stl')
+
+# Run injectivity optimization
+result = pytlc.find_injective_mapping(
+    rest_vertices=tlc_input['rest_vertices'],
+    init_vertices=tlc_input['init_vertices'],
+    simplices=tlc_input['simplices'],
+    handles=tlc_input['handles'],
+    verbose=True
+)
+
+# Save results
+pytlc.write_obj_file('result.obj', result['vertices'], tlc_input['surface_faces'])
+```
+
+## Example
+
+See the `examples/` directory for complete working examples including:
+- 2D triangle mesh parameterization (`example_2d.py`)
+- 3D STL surface mesh processing with Stanford Bunny (`example_stl_bunny.py`)
+- Converting from common mesh formats (OBJ, VTK, etc.)
+
+### Running the Bunny Example
+
+```bash
+# Make sure you have trimesh installed
+pip install trimesh numpy-stl
+
+# Run the example
+python pytlc/examples/example_stl_bunny.py
+```
+
+This will:
+1. Load a bunny mesh (as an icosphere approximation)
+2. Create a tetrahedral mesh from the surface
+3. Run TLC optimization to ensure injectivity
+4. Save results in both TLC and OBJ formats
+
+## Algorithm Details
+
+The TLC energy works by:
+1. Lifting simplices into a higher dimension
+2. Measuring their contents (area or volume) in the lifted space
+3. Minimizing the total lifted content while maintaining boundary constraints
+
+Key properties:
+- **Smooth**: The energy is smooth over the entire embedding space
+- **Global minima are injective**: Any global minimum corresponds to an injective mapping
+- **No initialization requirements**: Works even with highly non-injective initial configurations
+
+## Citation
+
+If you use this code in your research, please cite:
+
+```bibtex
+@article{du2020lifting,
+  title={Lifting Simplices to Find Injectivity},
+  author={Du, Xingyi and Aigerman, Noam and Zhou, Qingnan and Kovalsky, Shahar and Yan, Yajie and Kaufman, Danny and Ju, Tao},
+  journal={ACM Transactions on Graphics (Proceedings of SIGGRAPH 2020)},
+  year={2020}
+}
+```
+
+## License
+
+This is a reimplementation based on the original C++ code by Xingyi Du et al.
+Please refer to the original repository for licensing terms:
+https://github.com/duxingyi-charles/lifting_simplices_to_find_injectivity
+
+## Contributing
+
+Contributions are welcome! Please feel free to submit issues and pull requests.

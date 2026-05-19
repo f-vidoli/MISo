@@ -38,6 +38,21 @@ from .stl_utils import (
     create_tetrahedral_mesh_from_surface,
     check_mesh_orientation,
 )
+from .diagnostics import (
+    run_full_diagnostic,
+    diagnose_mesh_quality,
+    diagnose_material_stability,
+    diagnose_numerical_conditioning,
+    diagnose_stress_concentration,
+    DiagnosticResult,
+)
+from .visual_diagnostics import (
+    plot_mesh_quality_heatmap,
+    plot_stress_distribution,
+    plot_deformation_comparison,
+    plot_histogram_metrics,
+    generate_diagnostic_report,
+)
 
 __version__ = '0.1.0'
 __author__ = 'Based on work by Xingyi Du et al.'
@@ -66,4 +81,17 @@ __all__ = [
     'compute_von_mises_stress',
     'compute_shear_stress_hyperelastic',
     'compute_cauchy_stress_hyperelastic',
+    # Diagnostics
+    'run_full_diagnostic',
+    'diagnose_mesh_quality',
+    'diagnose_material_stability',
+    'diagnose_numerical_conditioning',
+    'diagnose_stress_concentration',
+    'DiagnosticResult',
+    # Visual diagnostics
+    'plot_mesh_quality_heatmap',
+    'plot_stress_distribution',
+    'plot_deformation_comparison',
+    'plot_histogram_metrics',
+    'generate_diagnostic_report',
 ]
