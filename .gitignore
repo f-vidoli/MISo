@@ -4,45 +4,39 @@ __pycache__/
 *.pyc
 *.pyo
 *.pyd
-.Python
-env/
-venv/
+
+# Dependencies
 .venv/
-pip-log.txt
-pip-delete-this-directory.txt
-.tox/
-.coverage
-.coverage.*
-.cache
-nosetests.xml
-coverage.xml
-*.cover
-*.log
-*.pot
-*.po
-*~
-.pytest_cache/
-.mypy_cache/
-.hypothesis/
+venv/
+env/
+.env
+.env.local
+.env.*
 
-# Generated reports and diagnostics
-diagnostic_output/
-diagnostic_reports/
+# Build artifacts
+build/
+dist/
+*.egg-info/
 
-# STL data files (if they are large binary files)
-*.stl
-
-# IDE and editor files
+# Editors
 .vscode/
 .idea/
 *.swp
 *.swo
-*.tmp
-
-# System files
-.DS_Store
-Thumbs.db
 
 # Logs
 *.log
+
+# Coverage
+.coverage
+coverage/
+htmlcov/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Testing
+.pytest_cache/
+.mypy_cache/
 ```

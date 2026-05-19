@@ -9,10 +9,23 @@ import numpy as np
 import matplotlib.pyplot as plt
 from matplotlib import cm
 from matplotlib.collections import PolyCollection, PatchCollection
-from mpl_toolkits.mplot3d import Axes3D
-from mpl_toolkits.mplot3d.art3d import Poly3DCollection
 from typing import Optional, Tuple, List, Union
 import os
+
+# Handle matplotlib version compatibility
+try:
+    # Matplotlib >= 3.4.0: Axes3D is accessed differently
+    from mpl_toolkits.mplot3d import Axes3D
+    from mpl_toolkits.mplot3d.art3d import Poly3DCollection
+except ImportError:
+    # Fallback for older versions
+    try:
+        from mpl_toolkits.mplot3d.axes3d import Axes3D
+        from mpl_toolkits.mplot3d.art3d import Poly3DCollection
+    except ImportError:
+        # If all else fails, we'll handle 3D plotting differently
+        Axes3D = None
+        Poly3DCollection = None
 
 from .diagnostics import (
     run_full_diagnostic,
@@ -229,11 +242,26 @@ def plot_stress_distribution(
     # Compute Von Mises stress for each element
     von_mises = []
     for i in range(len(elements)):
-        s = stress[i]
+        s = np.array(stress[i])  # Ensure numpy array
+        
+        # Safety check: ensure s is a 2D matrix
+        if s.ndim != 2 or s.shape[0] != s.shape[1]:
+            print(f"Warning: Invalid stress tensor shape {s.shape} at element {i}, skipping.")
+            von_mises.append(0.0)
+            continue
+            
         if dim == 3:
+            if s.shape != (3, 3):
+                print(f"Warning: Expected 3x3 stress tensor but got {s.shape} at element {i}.")
+                von_mises.append(0.0)
+                continue
             s_dev = s - np.trace(s) / 3 * np.eye(3)
             vm = np.sqrt(3/2 * np.sum(s_dev * s_dev))
         else:
+            if s.shape != (2, 2):
+                print(f"Warning: Expected 2x2 stress tensor but got {s.shape} at element {i}.")
+                von_mises.append(0.0)
+                continue
             s_dev = s - np.trace(s) / 2 * np.eye(2)
             vm = np.sqrt(np.sum(s_dev * s_dev))
         von_mises.append(vm)
