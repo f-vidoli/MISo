@@ -19,6 +19,12 @@ from .core import (
     compute_von_mises_stress,
     compute_shear_stress_hyperelastic,
     compute_cauchy_stress_hyperelastic,
+    relax_sphere_from_shear_stress,
+    compute_deformation_gradient_map,
+    compute_jacobian_determinant_map,
+    compose_maps_and_compute_jacobian,
+    compute_map_stressed_to_relaxed,
+    evaluate_map_at_points,
 )
 
 # Alias for convenience
@@ -85,6 +91,13 @@ __all__ = [
     'compute_von_mises_stress',
     'compute_shear_stress_hyperelastic',
     'compute_cauchy_stress_hyperelastic',
+    # Sphere relaxation and map computation
+    'relax_sphere_from_shear_stress',
+    'compute_deformation_gradient_map',
+    'compute_jacobian_determinant_map',
+    'compose_maps_and_compute_jacobian',
+    'compute_map_stressed_to_relaxed',
+    'evaluate_map_at_points',
     # Diagnostics
     'run_full_diagnostic',
     'diagnose_mesh_quality',
