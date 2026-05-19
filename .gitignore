@@ -4,11 +4,9 @@ __pycache__/
 *.pyc
 *.pyo
 *.pyd
-
-# Dependencies
-.venv/
+.Python
 venv/
-env/
+.venv/
 .env
 .env.local
 .env.*
@@ -21,17 +19,20 @@ dist/
 # Logs
 *.log
 
-# Editor/IDE
-.vscode/
-.idea/
-*.swp
-*.swo
-*.tmp
-
 # Coverage
 .coverage
 coverage/
 htmlcov/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
 
 # Testing
 .pytest_cache/
