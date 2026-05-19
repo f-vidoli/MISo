@@ -365,7 +365,9 @@ class TLCEnergy:
         else:  # dim == 3
             # For 3D, we need alpha^(1/3) for linear scaling, then square for squared edges
             # This ensures proper volume scaling
-            a = abs(self.alpha) ** (1.0 / 3.0) ** 2  # cube root, then square
+            # Fixed: Use explicit parentheses to ensure correct order of operations
+            # Original bug: (1.0/3.0)**2 was computed first due to right-to-left associativity
+            a = abs(self.alpha) ** (2.0 / 3.0)  # equivalent to (alpha^(1/3))^2
         
         rest_D = np.zeros((self.n_simplices, self.n_edges))
         
@@ -460,15 +462,16 @@ class TLCEnergy:
         
         # Compute gradient if requested
         if grad is not None:
-            # Compute dA/dD
+            # Compute dA/dD with numerical stability safeguards
             dAdD = np.zeros((self.n_simplices, self.n_edges))
+            eps = 1e-20  # Small epsilon to avoid division by zero
             for i in range(self.n_simplices):
                 if self.dim == 2:
                     gi = tri_grad_squared_edges(D[i])
-                    s = 1.0 / (4.0 * A[i]) if A[i] > 0 else 0
+                    s = 1.0 / (4.0 * A[i] + eps) if A[i] > eps else 0.0
                 else:
                     gi = tet_grad_squared_edges(D[i])
-                    s = 1.0 / (12.0 * A[i]) if A[i] > 0 else 0
+                    s = 1.0 / (12.0 * A[i] + eps) if A[i] > eps else 0.0
                 dAdD[i] = gi * s
             
             # Compute gradient w.r.t. vertex positions

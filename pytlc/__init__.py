@@ -40,8 +40,8 @@ from .core import (
     check_injectivity,
     tri_signed_area,
     tet_signed_volume,
-    tri_area_squared_edges as tri_area,
-    tet_volume_squared_edges as tet_volume,
+    tri_area_squared_edges,
+    tet_volume_squared_edges,
     compute_shear_stress_from_transformation_strain,
     compute_von_mises_stress,
     compute_shear_stress_hyperelastic,
@@ -53,23 +53,21 @@ from .core import (
     compute_composed_map_jacobian,
     compute_deformation_map,
     evaluate_map_at_points,
-    # Aliases for backward compatibility
-    relax_sphere_from_shear_stress,
-    compute_deformation_gradient_map,
-    compute_jacobian_determinant_map,
-    compose_maps_and_compute_jacobian,
-    compute_map_stressed_to_relaxed,
 )
 
-# Alias for convenience
-compute_hyperelastic_stress = compute_shear_stress_hyperelastic
+# Import aliases - define locally rather than importing
+tri_area = tri_area_squared_edges
+tet_volume = tet_volume_squared_edges
 
-# Additional aliases for common usage patterns
+# Aliases for backward compatibility - define locally
 relax_sphere_from_shear_stress = relax_boundary_preserving_sphericity
 compute_deformation_gradient_map = compute_deformation_gradient_tensor
 compute_jacobian_determinant_map = compute_morphoelastic_jacobian
 compose_maps_and_compute_jacobian = compute_composed_map_jacobian
 compute_map_stressed_to_relaxed = compute_deformation_map
+
+# Alias for convenience - define locally
+compute_hyperelastic_stress = compute_shear_stress_hyperelastic
 
 from .io_utils import (
     read_input_file,

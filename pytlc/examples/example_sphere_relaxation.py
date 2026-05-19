@@ -268,9 +268,9 @@ print(f"\n  Relaxed injectivity: {is_injective_relaxed} (min volume: {min_vol_re
 print("\n4. Computing map from stressed to relaxed sphere...")
 print("-" * 50)
 
-map_result = pytlc.compute_map_stressed_to_relaxed(
-    stressed_vertices=stressed_vertices,
-    relaxed_vertices=relaxed_vertices,
+map_result = pytlc.compute_deformation_map(
+    source_vertices=stressed_vertices,
+    target_vertices=relaxed_vertices,
     simplices=simplices
 )
 
@@ -291,7 +291,7 @@ print(f"    All positive: {np.all(J > 0)}")
 print("\n5. Computing composed map (initial -> stressed -> relaxed)...")
 print("-" * 50)
 
-composed_result = pytlc.compose_maps_and_compute_jacobian(
+composed_result = pytlc.compute_composed_map_jacobian(
     initial_vertices=vertices,
     stressed_vertices=stressed_vertices,
     relaxed_vertices=relaxed_vertices,
