@@ -117,9 +117,9 @@ print(f"    Max deviation: {np.max(np.abs(boundary_distances - sphere_radius)):.
 # =============================================================================
 print("\n5. Computing map from stressed to relaxed...")
 
-map_result = pytlc.compute_map_stressed_to_relaxed(
-    stressed_vertices=stressed_vertices,
-    relaxed_vertices=relaxed_vertices,
+map_result = pytlc.compute_deformation_map(
+    source_vertices=stressed_vertices,
+    target_vertices=relaxed_vertices,
     simplices=simplices
 )
 
@@ -138,7 +138,7 @@ print(f"    Mean: {np.mean(J_map):.6f}")
 # =============================================================================
 print("\n6. Computing composed map Jacobian determinant...")
 
-composed_result = pytlc.compose_maps_and_compute_jacobian(
+composed_result = pytlc.compute_composed_map_jacobian(
     initial_vertices=vertices,
     stressed_vertices=stressed_vertices,
     relaxed_vertices=relaxed_vertices,
