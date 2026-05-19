@@ -23,6 +23,74 @@ class DiagnosticResult:
     severity: str = "info"  # info, warning, error, critical
 
 
+def compute_jacobian_matrices(vertices: np.ndarray, elements: np.ndarray) -> np.ndarray:
+    """
+    Compute Jacobian matrices (deformation gradients) for all elements.
+    
+    For a mesh deformation from reference to deformed configuration,
+    this computes the element-wise constant deformation gradient F.
+    
+    Args:
+        vertices: (n_vertices, dim) array of reference vertex positions
+        elements: (n_elements, n_nodes_per_elem) array of element connectivity
+        
+    Returns:
+        (n_elements, dim, dim) array of Jacobian matrices
+    """
+    vertices = np.asarray(vertices)
+    elements = np.asarray(elements)
+    n_elements = len(elements)
+    dim = vertices.shape[1]
+    
+    jacobians = []
+    
+    for elem_idx in range(n_elements):
+        elem_nodes = elements[elem_idx]
+        elem_vertices = vertices[elem_nodes]
+        
+        if dim == 2:
+            # Triangle: compute 2x2 Jacobian
+            v0, v1, v2 = elem_vertices
+            J = np.column_stack([v1 - v0, v2 - v0])
+        elif dim == 3:
+            # Tetrahedron: compute 3x3 Jacobian
+            v0, v1, v2, v3 = elem_vertices
+            J = np.column_stack([v1 - v0, v2 - v0, v3 - v0])
+        else:
+            raise ValueError(f"Unsupported dimension: {dim}")
+        
+        jacobians.append(J)
+    
+    return np.array(jacobians)
+
+
+def compute_deformation_gradients(ref_vertices: np.ndarray, def_vertices: np.ndarray, 
+                                   elements: np.ndarray) -> np.ndarray:
+    """
+    Compute deformation gradients F for all elements between reference and deformed configurations.
+    
+    F = J_def * J_ref^(-1), where J is the Jacobian matrix of the element mapping.
+    
+    Args:
+        ref_vertices: (n_vertices, dim) array of reference vertex positions
+        def_vertices: (n_vertices, dim) array of deformed vertex positions
+        elements: (n_elements, n_nodes_per_elem) array of element connectivity
+        
+    Returns:
+        (n_elements, dim, dim) array of deformation gradient tensors
+    """
+    J_ref = compute_jacobian_matrices(ref_vertices, elements)
+    J_def = compute_jacobian_matrices(def_vertices, elements)
+    
+    F_elements = []
+    for i in range(len(elements)):
+        J_ref_inv = np.linalg.inv(J_ref[i])
+        F = J_def[i] @ J_ref_inv
+        F_elements.append(F)
+    
+    return np.array(F_elements)
+
+
 def compute_jacobian_determinants(vertices: np.ndarray, elements: np.ndarray) -> np.ndarray:
     """
     Compute Jacobian determinants for all elements.

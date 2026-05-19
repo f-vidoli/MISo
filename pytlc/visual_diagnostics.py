@@ -9,10 +9,23 @@ import numpy as np
 import matplotlib.pyplot as plt
 from matplotlib import cm
 from matplotlib.collections import PolyCollection, PatchCollection
-from mpl_toolkits.mplot3d import Axes3D
-from mpl_toolkits.mplot3d.art3d import Poly3DCollection
 from typing import Optional, Tuple, List, Union
 import os
+
+# Handle matplotlib version compatibility
+try:
+    # Matplotlib >= 3.4.0: Axes3D is accessed differently
+    from mpl_toolkits.mplot3d import Axes3D
+    from mpl_toolkits.mplot3d.art3d import Poly3DCollection
+except ImportError:
+    # Fallback for older versions
+    try:
+        from mpl_toolkits.mplot3d.axes3d import Axes3D
+        from mpl_toolkits.mplot3d.art3d import Poly3DCollection
+    except ImportError:
+        # If all else fails, we'll handle 3D plotting differently
+        Axes3D = None
+        Poly3DCollection = None
 
 from .diagnostics import (
     run_full_diagnostic,
