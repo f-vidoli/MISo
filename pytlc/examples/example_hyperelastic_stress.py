@@ -8,6 +8,15 @@ including the effect of transformation strains (eigenstrains).
 """
 
 import numpy as np
+import os
+import sys
+
+# Add grandparent directory to path for imports
+current_dir = os.path.dirname(os.path.abspath(__file__))
+parent_dir = os.path.dirname(current_dir)  # /workspace/pytlc
+grandparent_dir = os.path.dirname(parent_dir)  # /workspace
+sys.path.insert(0, grandparent_dir)
+
 import pytlc
 
 

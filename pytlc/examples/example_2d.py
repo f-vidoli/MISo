@@ -7,8 +7,14 @@ mapping for a 2D triangle mesh with a non-injective initial configuration.
 """
 
 import numpy as np
+import os
 import sys
-sys.path.insert(0, '/workspace')
+
+# Add grandparent directory to path for imports
+current_dir = os.path.dirname(os.path.abspath(__file__))
+parent_dir = os.path.dirname(current_dir)  # /workspace/pytlc
+grandparent_dir = os.path.dirname(parent_dir)  # /workspace
+sys.path.insert(0, grandparent_dir)
 
 from pytlc import find_injective_mapping, check_injectivity, read_input_file
 

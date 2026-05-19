@@ -1,0 +1,42 @@
+DIAGNOSTIC REPORT
+Generated: 2026-05-19T14:29:48.971321
+============================================================
+
+
+mesh_quality:
+  Passed: False
+  Severity: critical
+  Message: CRITICAL: 199 inverted elements detected!
+  Details:
+    n_elements: 200
+    min_jacobian: -0.01998999999999999
+    max_jacobian: 0.009999999999999995
+    mean_jacobian: -0.0098999
+    min_quality: 1.2992673912515901e-15
+    max_quality: 0.9948284250161341
+    mean_quality: 0.8777712013515082
+    n_inverted: 199
+    n_degenerate: 1
+    n_low_quality: 1
+
+stress_concentration:
+  Passed: True
+  Severity: info
+  Message: Stress distribution OK: max Von Mises = 1.6464
+  Details:
+    n_elements: 200
+    mean_von_mises: 0.7826934758139484
+    max_von_mises: 1.6463940467405491
+    min_von_mises: 0.0
+    threshold: 2.3480804274418454
+    n_concentrated: 0
+
+_summary:
+  Passed: False
+  Severity: critical
+  Message: Diagnostic complete: 1 critical, 0 errors, 0 warnings
+  Details:
+    all_passed: False
+    critical: 1
+    errors: 0
+    warnings: 0
