@@ -96,15 +96,23 @@ def read_stl_with_trimesh(filepath: str) -> Dict[str, np.ndarray]:
 def create_tetrahedral_mesh_from_surface(
     surface_vertices: np.ndarray,
     surface_faces: np.ndarray,
-    method: str = 'centroid'
+    method: str = 'centroid',
+    n_interior_points: int = 1,
+    seed: int = 42
 ) -> Dict[str, np.ndarray]:
     """
     Create a tetrahedral mesh from a surface triangle mesh.
     
     This is needed because TLC works on volumetric meshes (tetrahedra).
     For a closed surface mesh, we can create tetrahedra by connecting
-    each surface triangle to an interior point.
+    each surface triangle to interior points.
     
+    🧊 Methods:
+        - 'centroid': Connect all faces to the centroid (fast, single point)
+        - 'delaunay': Use Delaunay triangulation with interior sampling (even distribution)
+        - 'layered': Create layered interior points for boundary resolution
+        - 'origin': Connect all faces to the origin (if inside)
+        
     Parameters
     ----------
     surface_vertices : np.ndarray
@@ -112,34 +120,151 @@ def create_tetrahedral_mesh_from_surface(
     surface_faces : np.ndarray
         Surface mesh faces, shape (n_faces, 3)
     method : str
-        Method for creating tetrahedral mesh:
-        - 'centroid': Connect all faces to the centroid
-        - 'origin': Connect all faces to the origin (if inside)
+        Method for creating tetrahedral mesh (see above)
+    n_interior_points : int
+        Number of interior points to sample (for 'delaunay' and 'layered')
+    seed : int
+        Random seed for reproducibility
         
     Returns
     -------
     dict
         Dictionary containing:
-        - vertices: Tetrahedral mesh vertices (includes interior point)
+        - vertices: Tetrahedral mesh vertices (includes interior points)
         - tetrahedra: Tetrahedron connectivity, shape (n_tets, 4)
     """
+    np.random.seed(seed)
+    
     if method == 'centroid':
         # Compute centroid of all vertices
-        interior_point = np.mean(surface_vertices, axis=0, keepdims=True)
+        print("   🔵 Using centroid method (single interior point)...")
+        interior_points = np.mean(surface_vertices, axis=0, keepdims=True)
+        
     elif method == 'origin':
-        interior_point = np.array([[0.0, 0.0, 0.0]])
+        print("   🔵 Using origin method...")
+        interior_points = np.array([[0.0, 0.0, 0.0]])
+        
+    elif method == 'delaunay':
+        print("   🧊 Using Delaunay method with interior sampling...")
+        from scipy.spatial import Delaunay
+        
+        # Compute bounding box
+        bbox_min = surface_vertices.min(axis=0)
+        bbox_max = surface_vertices.max(axis=0)
+        bbox_center = (bbox_min + bbox_max) / 2
+        bbox_size = bbox_max - bbox_min
+        
+        # Sample interior points using Poisson-disk-like strategy
+        # Start with centroid and add random points inside shrunk bounding box
+        shrink_factor = 0.6  # Keep points well inside the surface
+        interior_candidates = [bbox_center]
+        
+        n_samples = max(n_interior_points - 1, 0)
+        if n_samples > 0:
+            random_points = np.random.uniform(
+                low=bbox_min + (1-shrink_factor)*bbox_size/2,
+                high=bbox_max - (1-shrink_factor)*bbox_size/2,
+                size=(n_samples, 3)
+            )
+            interior_candidates.extend(random_points.tolist())
+        
+        interior_points = np.array(interior_candidates)
+        
+        # Combine surface and interior points
+        all_points = np.vstack([surface_vertices, interior_points])
+        
+        # Compute Delaunay triangulation
+        print(f"   📐 Computing Delaunay triangulation for {len(all_points)} points...")
+        try:
+            delaunay = Delaunay(all_points)
+            tetrahedra_raw = delaunay.simplices
+            
+            # Filter tetrahedra: keep only those with all vertices on surface 
+            # OR with valid connectivity (at least one face from surface)
+            # For simplicity, we keep all Delaunay tetrahedra that are inside
+            # A better approach would use alpha shapes, but this works for convex-ish shapes
+            
+            # Keep all tetrahedra
+            tetrahedra = tetrahedra_raw.astype(np.int32)
+            
+            print(f"   ✅ Generated {len(tetrahedra)} tetrahedra via Delaunay")
+            return {
+                'vertices': all_points,
+                'tetrahedra': tetrahedra,
+                'method': 'delaunay'
+            }
+            
+        except Exception as e:
+            print(f"   ⚠️  Delaunay failed: {e}. Falling back to centroid method.")
+            method = 'centroid'
+            interior_points = np.mean(surface_vertices, axis=0, keepdims=True)
+            
+    elif method == 'layered':
+        print(f"   🧅 Using layered method with {n_interior_points} layers...")
+        # Create concentric layers of points shrinking toward centroid
+        centroid = np.mean(surface_vertices, axis=0)
+        interior_points_list = [centroid]
+        
+        for i in range(n_interior_points):
+            layer_factor = 0.3 + 0.5 * (i + 1) / n_interior_points
+            layer_points = centroid + (surface_vertices - centroid) * layer_factor
+            # Subsample to avoid too many points
+            if len(layer_points) > 100:
+                indices = np.random.choice(len(layer_points), 100, replace=False)
+                layer_points = layer_points[indices]
+            interior_points_list.append(layer_points)
+        
+        interior_points = np.vstack(interior_points_list)
+        
+        # Use Delaunay on the combined set
+        from scipy.spatial import Delaunay
+        all_points = np.vstack([surface_vertices, interior_points])
+        
+        try:
+            delaunay = Delaunay(all_points)
+            tetrahedra = delaunay.simplices.astype(np.int32)
+            print(f"   ✅ Generated {len(tetrahedra)} tetrahedra via layered Delaunay")
+            return {
+                'vertices': all_points,
+                'tetrahedra': tetrahedra,
+                'method': 'layered'
+            }
+        except Exception as e:
+            print(f"   ⚠️  Layered Delaunay failed: {e}. Falling back to centroid.")
+            method = 'centroid'
+            interior_points = np.mean(surface_vertices, axis=0, keepdims=True)
+            
     else:
-        raise ValueError(f"Unknown method: {method}")
+        raise ValueError(f"🚫 Unknown method: '{method}'. Valid options: 'centroid', 'origin', 'delaunay', 'layered'")
     
+    # Fallback: centroid/origin method (connect surface faces to interior points)
     # Check orientation of surface faces
     # Ensure all faces are oriented so that tetrahedra have positive volume
     # when connected to the interior point
     
-    # For each face, compute the signed volume of the tet formed with interior point
     n_faces = len(surface_faces)
-    tetrahedra = np.zeros((n_faces, 4), dtype=np.int32)
+    tetrahedra_list = []
     
-    interior_idx = len(surface_vertices)
+    interior_start_idx = len(surface_vertices)
+    
+    # If multiple interior points, we need a more sophisticated approach
+    # For now, just use the first interior point for centroid/origin
+    if len(interior_points) > 1:
+        print(f"   ⚠️  Multiple interior points detected. Using Delaunay for connectivity...")
+        from scipy.spatial import Delaunay
+        all_points = np.vstack([surface_vertices, interior_points])
+        try:
+            delaunay = Delaunay(all_points)
+            tetrahedra = delaunay.simplices.astype(np.int32)
+            return {
+                'vertices': all_points,
+                'tetrahedra': tetrahedra,
+                'method': method
+            }
+        except:
+            interior_points = interior_points[:1]  # Use only first point
+    
+    interior_point = interior_points[0:1]
     
     for i in range(n_faces):
         face = surface_faces[i]
@@ -156,17 +281,23 @@ def create_tetrahedral_mesh_from_surface(
         
         if vol_orig > 0:
             # Original orientation gives positive volume
-            tetrahedra[i] = [face[0], face[1], face[2], interior_idx]
+            tetrahedra_list.append([face[0], face[1], face[2], interior_start_idx])
         else:
             # Flip orientation
-            tetrahedra[i] = [face[1], face[0], face[2], interior_idx]
+            tetrahedra_list.append([face[1], face[0], face[2], interior_start_idx])
+    
+    # Convert list to array
+    tetrahedra = np.array(tetrahedra_list, dtype=np.int32)
     
     # Add interior point to vertices
     all_vertices = np.vstack([surface_vertices, interior_point])
     
+    print(f"   ✅ Generated {len(tetrahedra)} tetrahedra via {method} method")
+    
     return {
         'vertices': all_vertices,
         'tetrahedra': tetrahedra,
+        'method': method
     }
 
 

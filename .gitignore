@@ -18,23 +18,20 @@ build/
 dist/
 *.egg-info/
 
-# Editors
+# Logs
+*.log
+
+# Editor/IDE
 .vscode/
 .idea/
 *.swp
 *.swo
-
-# Logs
-*.log
+*.tmp
 
 # Coverage
 .coverage
 coverage/
 htmlcov/
-
-# OS
-.DS_Store
-Thumbs.db
 
 # Testing
 .pytest_cache/

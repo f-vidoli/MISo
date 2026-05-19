@@ -20,6 +20,10 @@ from .core import (
     compute_shear_stress_hyperelastic,
     compute_cauchy_stress_hyperelastic,
 )
+
+# Alias for convenience
+compute_hyperelastic_stress = compute_shear_stress_hyperelastic
+
 from .io_utils import (
     read_input_file,
     write_result_file,
