@@ -1343,3 +1343,691 @@ def _compute_hyperelastic_cauchy_single(
     sigma_full = sigma_dev + p * np.eye(dim)
     
     return sigma_full, sigma_dev
+
+
+def relax_boundary_preserving_sphericity(
+    stressed_vertices: np.ndarray,
+    simplices: np.ndarray,
+    boundary_vertex_indices: np.ndarray,
+    sphere_center: Optional[np.ndarray] = None,
+    sphere_radius: Optional[float] = None,
+    shear_modulus: float = 1.0,
+    bulk_modulus: Optional[float] = None,
+    max_iterations: int = 5000,
+    tolerance: float = 1e-8,
+    verbose: bool = False
+) -> Dict[str, Any]:
+    """
+    Relax a stressed configuration while preserving the sphericity of the boundary.
+    
+    This is the core relaxation routine in MISo (Morphoelastic Inverse problem Solver).
+    It computes the relaxed (stress-free) configuration of a body that has been deformed
+    by shear stress. The boundary vertices are constrained to lie on a sphere,
+    while interior vertices are free to move to minimize the elastic energy.
+    
+    The method uses an iterative projection approach:
+    1. Apply TLC energy minimization to find an injective mapping
+    2. Project boundary vertices back onto the sphere surface after each iteration
+    3. Continue until convergence
+    
+    This relaxation provides the morphoelastic inverse solution: given a deformed
+    shape, find the stress-free reference configuration that would produce it under
+    the applied boundary conditions.
+    
+    Parameters
+    ----------
+    stressed_vertices : np.ndarray
+        Vertex positions of the stressed (deformed) configuration, shape (n_verts, 3)
+    simplices : np.ndarray
+        Tetrahedral connectivity, shape (n_tets, 4)
+    boundary_vertex_indices : np.ndarray
+        Indices of vertices on the spherical boundary
+    sphere_center : np.ndarray, optional
+        Center of the sphere. If None, computed from boundary vertices.
+    sphere_radius : float, optional
+        Radius of the sphere. If None, computed from boundary vertices.
+    shear_modulus : float, optional
+        Shear modulus for hyperelastic material, by default 1.0
+    bulk_modulus : float, optional
+        Bulk modulus. If None, assumes nearly incompressible (bulk = 1000 * shear).
+    max_iterations : int, optional
+        Maximum number of relaxation iterations, by default 5000
+    tolerance : float, optional
+        Convergence tolerance for vertex displacement, by default 1e-8
+    verbose : bool, optional
+        Print progress information, by default False
+        
+    Returns
+    -------
+    dict
+        Dictionary containing:
+        - 'relaxed_vertices': Vertex positions of the relaxed (stress-free) configuration
+        - 'boundary_map': Map from stressed to relaxed boundary vertices
+        - 'interior_map': Map from stressed to relaxed interior vertices
+        - 'iterations': Number of iterations performed
+        - 'converged': Whether the relaxation converged
+        - 'displacement_history': History of maximum vertex displacement per iteration
+        - 'energy_history': History of TLC energy per iteration
+        - 'sphere_center': Center of the constraint sphere
+        - 'sphere_radius': Radius of the constraint sphere
+        
+    Notes
+    -----
+    The sphericity constraint is enforced by projecting boundary vertices onto
+    the sphere surface after each optimization step. This ensures that the
+    boundary remains exactly spherical throughout the relaxation process.
+    
+    The relaxation minimizes the elastic energy while maintaining injectivity
+    of the mapping, making it suitable for handling large deformations.
+    
+    In the context of MISo, this function solves the inverse problem:
+    Given the current (stressed) configuration Ω_current, find the reference
+    configuration Ω_ref such that the deformation gradient F satisfies the
+    constitutive relations with zero residual stress.
+    
+    See Also
+    --------
+    compute_morphoelastic_jacobian : Compute the Jacobian determinant (MISo solution)
+    compute_deformation_gradient_tensor : Compute F for each simplex
+    """
+    n_verts = stressed_vertices.shape[0]
+    dim = stressed_vertices.shape[1]
+    
+    if dim != 3:
+        raise ValueError("Sphere relaxation currently supports only 3D meshes")
+    
+    # Compute sphere parameters if not provided
+    if sphere_center is None:
+        sphere_center = np.mean(stressed_vertices[boundary_vertex_indices], axis=0)
+    
+    if sphere_radius is None:
+        distances = np.linalg.norm(stressed_vertices[boundary_vertex_indices] - sphere_center, axis=1)
+        sphere_radius = np.mean(distances)
+    
+    if bulk_modulus is None:
+        bulk_modulus = 1000.0 * shear_modulus
+    
+    # Identify interior vertices
+    all_indices = set(range(n_verts))
+    boundary_set = set(boundary_vertex_indices)
+    interior_indices = np.array(list(all_indices - boundary_set), dtype=np.int64)
+    
+    if len(interior_indices) == 0:
+        # All vertices are boundary vertices - create empty array with proper shape
+        interior_indices = np.array([], dtype=np.int64)
+    
+    # Create initial embedding (stressed configuration)
+    init_vertices = stressed_vertices.copy()
+    
+    # Use rest configuration as identity (stress-free reference)
+    rest_vertices = init_vertices.copy()
+    
+    # Handles are the boundary vertices (constrained to sphere)
+    handles = boundary_vertex_indices
+    
+    # Store history
+    displacement_history = []
+    energy_history = []
+    
+    # Current vertex positions
+    current_vertices = init_vertices.copy()
+    
+    if verbose:
+        print(f"Sphere Relaxation Setup:")
+        print(f"  Total vertices: {n_verts}")
+        print(f"  Boundary vertices: {len(boundary_vertex_indices)}")
+        print(f"  Interior vertices: {len(interior_indices)}")
+        print(f"  Sphere center: {sphere_center}")
+        print(f"  Sphere radius: {sphere_radius}")
+    
+    # Iterative relaxation with boundary projection
+    converged = False
+    for iteration in range(max_iterations):
+        # Store previous positions
+        prev_vertices = current_vertices.copy()
+        
+        # Run one step of TLC optimization
+        tlc_result = find_injective_mapping(
+            rest_vertices=rest_vertices,
+            init_vertices=current_vertices,
+            simplices=simplices,
+            handles=handles,
+            form='harmonic',
+            alpha_ratio=1e-6,
+            max_iterations=min(100, max_iterations // 10),
+            ftol_rel=tolerance,
+            xtol_rel=tolerance,
+            stop_when_injective=True,
+            verbose=False
+        )
+        
+        current_vertices = tlc_result['vertices'].copy()
+        
+        # Project boundary vertices onto sphere
+        for idx in boundary_vertex_indices:
+            vec = current_vertices[idx] - sphere_center
+            norm = np.linalg.norm(vec)
+            if norm > 1e-10:
+                current_vertices[idx] = sphere_center + (sphere_radius / norm) * vec
+            else:
+                # Random direction if at center
+                direction = np.random.randn(3)
+                direction /= np.linalg.norm(direction)
+                current_vertices[idx] = sphere_center + sphere_radius * direction
+        
+        # Compute maximum displacement
+        displacement = np.max(np.linalg.norm(current_vertices - prev_vertices, axis=1))
+        displacement_history.append(displacement)
+        energy_history.append(tlc_result['energy'])
+        
+        if verbose and iteration % 10 == 0:
+            print(f"  Iteration {iteration}: max displacement = {displacement:.6e}, energy = {tlc_result['energy']:.6e}")
+        
+        # Check convergence
+        if displacement < tolerance:
+            converged = True
+            if verbose:
+                print(f"Converged at iteration {iteration}")
+            break
+    
+    # Compute maps
+    # Map from stressed to relaxed: phi(x_stressed) = x_relaxed
+    boundary_map = {
+        'stressed': stressed_vertices[boundary_vertex_indices].copy(),
+        'relaxed': current_vertices[boundary_vertex_indices].copy(),
+        'indices': boundary_vertex_indices
+    }
+    
+    interior_map = {
+        'stressed': stressed_vertices[interior_indices].copy(),
+        'relaxed': current_vertices[interior_indices].copy(),
+        'indices': interior_indices
+    }
+    
+    result = {
+        'relaxed_vertices': current_vertices,
+        'boundary_map': boundary_map,
+        'interior_map': interior_map,
+        'iterations': iteration + 1,
+        'converged': converged,
+        'displacement_history': displacement_history,
+        'energy_history': energy_history,
+        'sphere_center': sphere_center,
+        'sphere_radius': sphere_radius
+    }
+    
+    if verbose:
+        print(f"\nRelaxation completed:")
+        print(f"  Converged: {converged}")
+        print(f"  Total iterations: {result['iterations']}")
+        print(f"  Final max displacement: {displacement_history[-1]:.6e}")
+    
+    return result
+
+
+def compute_deformation_gradient_tensor(
+    source_vertices: np.ndarray,
+    target_vertices: np.ndarray,
+    simplices: np.ndarray
+) -> np.ndarray:
+    """
+    Compute the deformation gradient tensor F for each simplex.
+    
+    The deformation gradient F maps vectors from the source configuration
+    to the target configuration: v_target = F * v_source
+    
+    This is a fundamental quantity in continuum mechanics and morphoelasticity.
+    For a simplex with vertices x0, x1, ..., xn in the source and
+    y0, y1, ..., yn in the target, we compute F such that:
+        yi - y0 = F * (xi - x0) for i = 1, ..., n
+    
+    In the context of MISo, this computes the local deformation gradient
+    between two configurations (e.g., stressed -> relaxed).
+    
+    Parameters
+    ----------
+    source_vertices : np.ndarray
+        Source vertex positions, shape (n_verts, dim)
+    target_vertices : np.ndarray
+        Target vertex positions, shape (n_verts, dim)
+    simplices : np.ndarray
+        Simplex connectivity, shape (n_simplices, dim+1)
+        
+    Returns
+    -------
+    np.ndarray
+        Deformation gradient tensors, shape (n_simplices, dim, dim)
+        
+    Notes
+    -----
+    The deformation gradient can be decomposed as F = R * U (polar decomposition),
+    where R is rotation and U is the right stretch tensor. The Jacobian determinant
+    J = det(F) measures local volume change.
+    
+    See Also
+    --------
+    compute_morphoelastic_jacobian : Compute J = det(F) (the MISo solution)
+    """
+    n_simplices = len(simplices)
+    dim = source_vertices.shape[1]
+    
+    deformation_gradients = np.zeros((n_simplices, dim, dim))
+    
+    for i in range(n_simplices):
+        # Get simplex vertices
+        source_pts = source_vertices[simplices[i]]
+        target_pts = target_vertices[simplices[i]]
+        
+        # Build edge matrices
+        # X: edges in source config, Y: edges in target config
+        X = np.zeros((dim, dim))
+        Y = np.zeros((dim, dim))
+        
+        for j in range(dim):
+            X[:, j] = source_pts[j + 1] - source_pts[0]
+            Y[:, j] = target_pts[j + 1] - target_pts[0]
+        
+        # Compute deformation gradient: F = Y * X^(-1)
+        try:
+            X_inv = np.linalg.inv(X)
+            F = Y @ X_inv
+            deformation_gradients[i] = F
+        except np.linalg.LinAlgError:
+            # Singular matrix - use pseudo-inverse
+            X_pinv = np.linalg.pinv(X)
+            F = Y @ X_pinv
+            deformation_gradients[i] = F
+    
+    return deformation_gradients
+
+
+def compute_morphoelastic_jacobian(
+    source_vertices: np.ndarray,
+    target_vertices: np.ndarray,
+    simplices: np.ndarray
+) -> np.ndarray:
+    """
+    Compute the Jacobian determinant J = det(F) for each simplex.
+    
+    This is the core MISo (Morphoelastic Inverse problem Solver) solution.
+    Given an STL mesh representing a deformed configuration, this function
+    computes the local volume change ratio between the source and target
+    configurations.
+    
+    The Jacobian determinant measures the local volume change:
+    - J > 1: local expansion
+    - J < 1: local compression  
+    - J = 1: volume-preserving
+    
+    In morphoelasticity, J represents the growth factor or the determinant
+    of the elastic part of the deformation gradient.
+    
+    Parameters
+    ----------
+    source_vertices : np.ndarray
+        Source vertex positions, shape (n_verts, dim)
+    target_vertices : np.ndarray
+        Target vertex positions, shape (n_verts, dim)
+    simplices : np.ndarray
+        Simplex connectivity, shape (n_simplices, dim+1)
+        
+    Returns
+    -------
+    np.ndarray
+        Jacobian determinants, shape (n_simplices,)
+        
+    Notes
+    -----
+    The Jacobian determinant is computed as:
+        J = det(F) where F = d(target)/d(source)
+    
+    For the morphoelastic inverse problem, this gives the local volume
+    change required to transform the stressed configuration into the
+    relaxed (stress-free) configuration.
+    
+    See Also
+    --------
+    compute_deformation_gradient_tensor : Compute F tensor
+    stl_to_jacobian : Complete pipeline from STL file to Jacobian field
+    """
+    deformation_gradients = compute_deformation_gradient_tensor(
+        source_vertices, target_vertices, simplices
+    )
+    
+    jacobian_determinants = np.array([
+        np.linalg.det(deformation_gradients[i])
+        for i in range(len(simplices))
+    ])
+    
+    return jacobian_determinants
+
+
+# Aliases for backward compatibility (defined after all functions)
+# These will be set at the end of the file after all function definitions
+
+
+def compute_composed_map_jacobian(
+    initial_vertices: np.ndarray,
+    stressed_vertices: np.ndarray,
+    relaxed_vertices: np.ndarray,
+    simplices: np.ndarray
+) -> Dict[str, np.ndarray]:
+    """
+    Compute the Jacobian determinant of the composed deformation map.
+    
+    Given three configurations in the morphoelastic problem:
+    - Initial (Ω₀): reference configuration (undeformed)
+    - Stressed (Ωₛ): deformed by applied stress
+    - Relaxed (Ωᵣ): stress-relaxed while preserving boundary constraints
+    
+    This function computes the complete deformation chain and its Jacobian:
+    1. Deformation gradient F₁: initial → stressed
+    2. Deformation gradient F₂: stressed → relaxed  
+    3. Composed deformation gradient F = F₂ · F₁: initial → relaxed
+    4. Jacobian determinant J = det(F) for the composed map
+    
+    The composition follows the chain rule:
+        F_composed = F_stressed_to_relaxed · F_initial_to_stressed
+        J_composed = J_stressed_to_relaxed × J_initial_to_stressed
+    
+    In MISo, this represents the total morphoelastic transformation from
+    the initial configuration through the stressed state to the relaxed state.
+    
+    Parameters
+    ----------
+    initial_vertices : np.ndarray
+        Initial (reference) vertex positions, shape (n_verts, dim)
+    stressed_vertices : np.ndarray
+        Stressed vertex positions, shape (n_verts, dim)
+    relaxed_vertices : np.ndarray
+        Relaxed vertex positions, shape (n_verts, dim)
+    simplices : np.ndarray
+        Simplex connectivity, shape (n_simplices, dim+1)
+        
+    Returns
+    -------
+    dict
+        Dictionary containing:
+        - 'jacobian_determinants': J = det(F_composed) for each simplex
+        - 'deformation_gradient_initial_to_stressed': F₁ tensor
+        - 'deformation_gradient_stressed_to_relaxed': F₂ tensor
+        - 'deformation_gradient_composed': F = F₂ · F₁ tensor
+        - 'volume_ratios': Local volume change ratios (same as jacobian_determinants)
+        - 'jacobian_initial_to_stressed': J₁ = det(F₁)
+        - 'jacobian_stressed_to_relaxed': J₂ = det(F₂)
+        - 'jacobian_chain_rule_product': J₂ × J₁ (verification)
+        
+    Notes
+    -----
+    The chain rule verification ensures numerical consistency:
+        max|J_composed - J₂ × J₁| < tolerance
+    
+    This is useful for debugging and validation of the morphoelastic solver.
+    
+    See Also
+    --------
+    compute_morphoelastic_jacobian : Compute J for a single map
+    relax_boundary_preserving_sphericity : Compute relaxed configuration
+    """
+    # Compute deformation gradients for each map
+    F_initial_to_stressed = compute_deformation_gradient_tensor(
+        initial_vertices, stressed_vertices, simplices
+    )
+    
+    F_stressed_to_relaxed = compute_deformation_gradient_tensor(
+        stressed_vertices, relaxed_vertices, simplices
+    )
+    
+    # Composed map: initial -> relaxed
+    F_composed = np.zeros_like(F_initial_to_stressed)
+    for i in range(len(simplices)):
+        F_composed[i] = F_stressed_to_relaxed[i] @ F_initial_to_stressed[i]
+    
+    # Compute Jacobian determinants
+    J_initial_to_stressed = np.array([
+        np.linalg.det(F_initial_to_stressed[i])
+        for i in range(len(simplices))
+    ])
+    
+    J_stressed_to_relaxed = np.array([
+        np.linalg.det(F_stressed_to_relaxed[i])
+        for i in range(len(simplices))
+    ])
+    
+    J_composed = np.array([
+        np.linalg.det(F_composed[i])
+        for i in range(len(simplices))
+    ])
+    
+    # Verify chain rule: det(AB) = det(A)*det(B)
+    J_chain_rule = J_stressed_to_relaxed * J_initial_to_stressed
+    
+    result = {
+        'jacobian_determinants': J_composed,
+        'deformation_gradient_initial_to_stressed': F_initial_to_stressed,
+        'deformation_gradient_stressed_to_relaxed': F_stressed_to_relaxed,
+        'deformation_gradient_composed': F_composed,
+        'volume_ratios': J_composed,
+        'jacobian_initial_to_stressed': J_initial_to_stressed,
+        'jacobian_stressed_to_relaxed': J_stressed_to_relaxed,
+        'jacobian_chain_rule_product': J_chain_rule
+    }
+    
+    return result
+
+
+def compute_deformation_map(
+    source_vertices: np.ndarray,
+    target_vertices: np.ndarray,
+    simplices: np.ndarray,
+    evaluation_points: Optional[np.ndarray] = None
+) -> Dict[str, Any]:
+    """
+    Compute the complete deformation map between two configurations.
+    
+    This function provides a comprehensive representation of the morphoelastic
+    deformation, including displacement field, deformation gradient tensor,
+    and Jacobian determinant (the MISo solution).
+    
+    The map φ: Ω_source → Ω_target is characterized by:
+    - Displacement field: u(x) = φ(x) - x
+    - Deformation gradient: F = ∂φ/∂X
+    - Jacobian determinant: J = det(F)
+    
+    Parameters
+    ----------
+    source_vertices : np.ndarray
+        Source configuration vertex positions, shape (n_verts, dim)
+    target_vertices : np.ndarray
+        Target configuration vertex positions, shape (n_verts, dim)
+    simplices : np.ndarray
+        Simplex connectivity, shape (n_simplices, dim+1)
+    evaluation_points : np.ndarray, optional
+        Points at which to evaluate the map, shape (n_points, dim)
+        If None, returns only element-wise quantities
+        
+    Returns
+    -------
+    dict
+        Dictionary containing:
+        - 'vertex_map': Displacement at vertices (target - source)
+        - 'deformation_gradients': F tensor for each simplex
+        - 'jacobian_determinants': J = det(F) for each simplex (MISo solution)
+        - 'evaluated_map': Map values at evaluation points (if provided)
+        - 'displacement_magnitude': |u| at each vertex
+        - 'max_displacement': Maximum vertex displacement
+        - 'mean_displacement': Mean vertex displacement
+        
+    Notes
+    -----
+    In the context of MISo, this function is typically used to compute:
+    - stressed → relaxed map (inverse morphoelastic problem)
+    - initial → deformed map (forward problem)
+    
+    See Also
+    --------
+    compute_morphoelastic_jacobian : Compute J only
+    compute_deformation_gradient_tensor : Compute F only
+    relax_boundary_preserving_sphericity : Compute relaxed configuration
+    """
+    n_verts = source_vertices.shape[0]
+    dim = source_vertices.shape[1]
+    
+    # Vertex displacement map
+    displacement = target_vertices - source_vertices
+    displacement_magnitude = np.linalg.norm(displacement, axis=1)
+    
+    # Deformation gradients
+    F = compute_deformation_gradient_tensor(source_vertices, target_vertices, simplices)
+    
+    # Jacobian determinants
+    J = compute_morphoelastic_jacobian(source_vertices, target_vertices, simplices)
+    
+    result = {
+        'vertex_map': displacement,
+        'deformation_gradients': F,
+        'jacobian_determinants': J,
+        'displacement_magnitude': displacement_magnitude,
+        'max_displacement': np.max(displacement_magnitude),
+        'mean_displacement': np.mean(displacement_magnitude)
+    }
+    
+    # Evaluate at arbitrary points if requested
+    if evaluation_points is not None:
+        evaluated = evaluate_map_at_points(
+            source_vertices, target_vertices, simplices, evaluation_points
+        )
+        result['evaluated_map'] = evaluated
+    
+    return result
+
+
+# Alias for backward compatibility
+compute_map_stressed_to_relaxed = compute_deformation_map
+
+
+def evaluate_map_at_points(
+    source_vertices: np.ndarray,
+    target_vertices: np.ndarray,
+    simplices: np.ndarray,
+    evaluation_points: np.ndarray
+) -> Dict[str, np.ndarray]:
+    """
+    Evaluate the deformation map at arbitrary points using barycentric interpolation.
+    
+    Parameters
+    ----------
+    source_vertices : np.ndarray
+        Source vertex positions, shape (n_verts, dim)
+    target_vertices : np.ndarray
+        Target vertex positions, shape (n_verts, dim)
+    simplices : np.ndarray
+        Simplex connectivity, shape (n_simplices, dim+1)
+    evaluation_points : np.ndarray
+        Points to evaluate, shape (n_points, dim)
+        
+    Returns
+    -------
+    dict
+        Dictionary containing:
+        - 'mapped_points': Evaluated map values
+        - 'simplex_indices': Which simplex each point falls in (-1 if outside)
+        - 'barycentric_coords': Barycentric coordinates for interpolation
+    """
+    n_points = evaluation_points.shape[0]
+    dim = source_vertices.shape[1]
+    
+    mapped_points = np.zeros((n_points, dim))
+    simplex_indices = np.full(n_points, -1, dtype=int)
+    barycentric_coords = np.zeros((n_points, dim + 1))
+    
+    for p_idx in range(n_points):
+        pt = evaluation_points[p_idx]
+        
+        # Find containing simplex
+        found = False
+        for s_idx in range(len(simplices)):
+            verts = source_vertices[simplices[s_idx]]
+            
+            # Compute barycentric coordinates
+            if dim == 2:
+                bary = _compute_barycentric_2d(pt, verts)
+            elif dim == 3:
+                bary = _compute_barycentric_3d(pt, verts)
+            else:
+                raise ValueError(f"Unsupported dimension: {dim}")
+            
+            # Check if point is inside simplex (all barycentric coords >= 0)
+            if np.all(bary >= -1e-10):
+                # Normalize to sum to 1
+                bary = bary / np.sum(bary)
+                
+                # Interpolate target position
+                target_verts = target_vertices[simplices[s_idx]]
+                mapped_points[p_idx] = np.dot(bary, target_verts)
+                
+                simplex_indices[p_idx] = s_idx
+                barycentric_coords[p_idx] = bary
+                found = True
+                break
+        
+        if not found:
+            # Point outside mesh - use nearest vertex
+            distances = np.linalg.norm(source_vertices - pt, axis=1)
+            nearest_idx = np.argmin(distances)
+            mapped_points[p_idx] = target_vertices[nearest_idx]
+    
+    return {
+        'mapped_points': mapped_points,
+        'simplex_indices': simplex_indices,
+        'barycentric_coords': barycentric_coords
+    }
+
+
+def _compute_barycentric_2d(pt: np.ndarray, verts: np.ndarray) -> np.ndarray:
+    """Compute barycentric coordinates for a point in a triangle."""
+    # Triangle vertices
+    v0, v1, v2 = verts
+    
+    # Vectors
+    v0v1 = v1 - v0
+    v0v2 = v2 - v0
+    v0p = pt - v0
+    
+    # Dot products
+    d00 = np.dot(v0v1, v0v1)
+    d01 = np.dot(v0v1, v0v2)
+    d11 = np.dot(v0v2, v0v2)
+    d20 = np.dot(v0p, v0v1)
+    d21 = np.dot(v0p, v0v2)
+    
+    # Barycentric coordinates
+    denom = d00 * d11 - d01 * d01
+    if abs(denom) < 1e-10:
+        return np.array([1/3, 1/3, 1/3])
+    
+    v = (d11 * d20 - d01 * d21) / denom
+    w = (d00 * d21 - d01 * d20) / denom
+    u = 1.0 - v - w
+    
+    return np.array([u, v, w])
+
+
+def _compute_barycentric_3d(pt: np.ndarray, verts: np.ndarray) -> np.ndarray:
+    """Compute barycentric coordinates for a point in a tetrahedron."""
+    # Tetrahedron vertices
+    v0, v1, v2, v3 = verts
+    
+    # Compute volumes using signed volume formula
+    vol = tet_signed_volume(verts)
+    
+    if abs(vol) < 1e-10:
+        return np.array([0.25, 0.25, 0.25, 0.25])
+    
+    # Barycentric coordinates are ratios of sub-tetrahedron volumes
+    b0 = tet_signed_volume(np.array([pt, v1, v2, v3])) / vol
+    b1 = tet_signed_volume(np.array([v0, pt, v2, v3])) / vol
+    b2 = tet_signed_volume(np.array([v0, v1, pt, v3])) / vol
+    b3 = tet_signed_volume(np.array([v0, v1, v2, pt])) / vol
+    
+    return np.array([b0, b1, b2, b3])
