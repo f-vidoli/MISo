@@ -1,0 +1,19 @@
+# build artifacts
+/miso
+/cmcf
+*.o
+
+# run outputs
+out/
+*.mp4
+
+# python
+__pycache__/
+*.pyc
+
+# opencode local memory
+.opencode/
+
+# editor / OS noise
+.DS_Store
+*.swp
